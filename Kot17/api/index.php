@@ -1,3 +1,3 @@
 ﻿<?php
-// បាញ់ Request ទៅកាន់ public/index.php ដោយផ្ទាល់
+// កូដសម្រាប់រចនាសម្ព័ន្ធថ្មី
 require __DIR__ . '/../public/index.php';
