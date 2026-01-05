@@ -23,6 +23,10 @@ use App\Http\Controllers\Collector\CollectionController;
 use App\Http\Controllers\Member\DashboardController as MemberDashboard;
 use App\Http\Controllers\Member\ProfileController;
 
+
+
+use Illuminate\Support\Facades\Artisan;
+
 Route::get('/', fn () => redirect()->route('login'));
 
 // Guest
@@ -98,4 +102,12 @@ Route::middleware(['auth', 'role:member'])->prefix('member')->name('member.')->g
 
     // ❌ remove duplicate skip-meal route, keep ONE
     Route::post('/skip-meal', [MemberDashboard::class, 'skipMeal'])->name('skip_meal');
+});
+Route::get('/init-db', function () {
+    try {
+        Artisan::call('migrate --force');
+        return "✅ Database Initialized Successfully!";
+    } catch (\Exception $e) {
+        return "❌ Error: " . $e->getMessage();
+    }
 });
