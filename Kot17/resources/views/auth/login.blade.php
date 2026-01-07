@@ -56,7 +56,7 @@
             width: 96px;
             height: 96px;
             border-radius: 22px;
-            background: rgba(255,255,255,0.18);
+            background: rgb(255, 255, 255);
             display: grid;
             place-items: center;
             margin: 0 auto 14px;

@@ -5,110 +5,172 @@ namespace App\Http\Controllers\Member;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\Donation;
-use App\Models\User; // បន្ថែម User model
+use App\Models\User;
 use Illuminate\Support\Facades\Http;
 
 class DashboardController extends Controller
 {
-    public function index() 
-{
-    $userId = auth()->id();
-    
-    // ១. ទាញទិន្នន័យសម្រាប់ស្ថិតិផ្ទាល់ខ្លួន (ការពារ Error $totalIn, $paymentsCount)
-    $totalIn = \App\Models\Donation::where('user_id', $userId)->sum('amount') ?? 0;
-    $paymentsCount = \App\Models\Donation::where('user_id', $userId)->count();
-    $recentDonations = \App\Models\Donation::where('user_id', $userId)
-                        ->orderBy('created_at', 'desc')
-                        ->limit(5)
-                        ->get();
+    public function index()
+    {
+        $user       = auth()->user();
+        $today      = today();
 
-    // ២. ទាញទិន្នន័យរចនាសម្ពន្ធ
-    $admin = User::where('role', 'admin')->first();
-    $treasurer = User::where('role', 'treasurer')->first();
-    $collectors = User::where('role', 'collector')->get();
-    $allMembers = User::whereIn('role', ['monk', 'member', 'student'])->get();
+        /**
+         * 1️⃣ My report (today, amount = 0)
+         */
+        $myReport = Donation::where('user_id', $user->id)
+            ->whereDate('created_at', $today)
+            ->where('amount', 0)
+            ->first();
 
-    // ៣. ស្ថិតិវត្តមានថ្ងៃនេះ
-    $todayReports = \App\Models\Donation::whereDate('created_at', today())->count();
-    $countMonks = User::where('role', 'monk')->count();
-    $countStudents = User::where('role', 'student')->count();
-    $countMembers = User::where('role', 'member')->count();
-    $totalPeople = $countMonks + $countStudents + $countMembers;
+        /**
+         * 2️⃣ Organization roles
+         */
+        $admin      = User::where('role', 'admin')->first();
+        $treasurer  = User::where('role', 'treasurer')->first();
+        $collectors = User::where('role', 'collector')->orderBy('name')->get();
+        $members    = User::where('role', 'member')->orderBy('name')->get();
 
-    // ៤. បោះទៅ View (ប្រាកដថាឈ្មោះក្នុង compact ត្រូវនឹង variable ខាងលើ)
-    return view('member.dashboard', compact(
-        'totalIn', 
-        'paymentsCount', 
-        'recentDonations', 
-        'admin', 
-        'treasurer', 
-        'collectors', 
-        'allMembers',
-        'countMonks', 
-        'countStudents', 
-        'countMembers', 
-        'totalPeople',
-        'todayReports'
-    ));
-}
+        /**
+         * 3️⃣ Donation stats (for current user)
+         */
+        $totalIn = Donation::where('user_id', $user->id)->sum('amount');
+        $paymentsCount = Donation::where('user_id', $user->id)->count();
 
+        $recentDonations = Donation::where('user_id', $user->id)
+            ->orderByDesc('created_at')
+            ->limit(5)
+            ->get();
+
+        /**
+         * 4️⃣ Attendance (ALL users)
+         */
+        $allMembers = User::whereIn('role', ['admin','treasurer','collector','member','monk','student'])
+            ->orderBy('name')
+            ->get();
+
+        $totalPeople = $allMembers->count();
+
+        /**
+         * 5️⃣ Today offline reports (ONE QUERY)
+         */
+        $todayOfflineReports = Donation::whereDate('created_at', $today)
+            ->where('amount', 0)
+            ->select(['id','user_id','reason','status','created_at'])
+            ->get()
+            ->keyBy('user_id');
+
+        $todayReports = $todayOfflineReports->count();
+        $offlineUserIds = $todayOfflineReports->keys()->all();
+
+        return view('member.dashboard', compact(
+            'user',
+            'myReport',
+
+            'admin',
+            'treasurer',
+            'collectors',
+            'members',
+
+            'totalIn',
+            'paymentsCount',
+            'recentDonations',
+
+            'allMembers',
+            'totalPeople',
+            'todayReports',
+            'todayOfflineReports',
+            'offlineUserIds'
+        ));
+    }
+
+    /**
+     * Skip / Late report
+     */
     public function skipMeal(Request $request)
     {
-        // ១. ត្រួតពិនិត្យម៉ោង (អនុញ្ញាតតែម៉ោង 00:00 ដល់ 12:00)
-        $currentHour = now()->format('H'); 
+        $request->validate([
+            'reason' => 'required|string|max:500',
+            'status' => 'required|in:skip,late',
+        ]);
 
-        if ($currentHour >= 12) {
-            return back()->with('error', '⚠️ ការរាយការណ៍ត្រូវបានបិទ! អ្នកអាចរាយការណ៍បានតែនៅចន្លោះម៉ោង ១២:០០ យប់ ដល់ ១២:០០ ថ្ងៃត្រង់ប៉ុណ្ណោះ។');
-        }
-
-        // ២. ចាប់យកទិន្នន័យពី Form
-        $reason = $request->input('reason', 'មិនបានបញ្ជាក់មូលហេតុ'); 
-        $statusType = $request->input('status');
         $user = auth()->user();
-        $userName = $user->name;
-        $role = strtolower($user->role);
 
-        // ៣. លក្ខខណ្ឌមិនផ្ញើសារសម្រាប់កូនសិស្ស (ប្រសិនបើកំណត់ថា student មិនបាច់ report)
-        if ($role === 'student') {
-            return back()->with('info', 'កូនសិស្សមិនចាំបាច់រាយការណ៍ឡើយ។');
+        // ❌ Prevent duplicate report in same day
+        $alreadyReported = Donation::where('user_id', $user->id)
+            ->whereDate('created_at', today())
+            ->where('amount', 0)
+            ->exists();
+
+        if ($alreadyReported) {
+            return back()->with('success', 'លោកបានរាយការណ៍រួចហើយសម្រាប់ថ្ងៃនេះ។');
         }
 
-        // ៤. កំណត់ខ្លឹមសារសារតាមប្រភេទ Status
-        if ($statusType === 'late') {
-            $header = "⏳ **និមន្តមកឆាន់យឺត** ⏳";
-            $detail = "ខ្ញុំកុណានឹង **និមន្តមកឆាន់ដែរ** ប៉ុន្តែអាចនឹងមកយឺតបន្តិច ពីព្រោះ៖";
-            $footer = "✅ ស្ថានភាព៖ **មកយឺត (សូមមេត្តាទុកចង្ហាន់ឱ្យផង)**";
-        } else {
-            $header = "🔔 **អវត្តមានភត្ត** 🔔";
-            $detail = "ខ្ញុំកុណានឹង **មិនបាននិមន្តមកឆាន់** នៅកុដិទេថ្ងៃនេះ ពីព្រោះ៖";
-            $footer = "✅ ស្ថានភាព៖ **និមន្តទៅខាងក្រៅ (មិនឆាន់)**";
-        }
+        // ✅ Save report
+        Donation::create([
+            'user_id' => $user->id,
+            'amount'  => 0,
+            'status'  => $request->status,
+            'reason'  => $request->reason,
+        ]);
 
-        // ៥. រៀបចំ Template សារសម្រាប់ Telegram
-        $botToken = "8417479652:AAHBhZhajfmSPvkpUUdf79MblK1bTkvI8mY";
-        $chatId = "828036461";
-        $divider = "───────────────────";
-        
-        $message = "📍 " . $header . "\n" .
-                   $divider . "\n\n" .
-                   "👤 **ព្រះតេជគុណ:** " . $userName . "\n" .
-                   "🙏 **សេចក្តីរាយការណ៍:**\n" .
-                   "_" . $detail . "_\n\n" .
-                   "📝 **មូលហេតុ:** `" . $reason . "`\n" .
-                   "⏰ **ពេលវេលា:** " . now()->format('d-M-Y | H:i') . "\n\n" .
-                   $divider . "\n" .
-                   $footer;
+        // 📩 Telegram
+        $this->sendTelegramNotification($user, $request->status, $request->reason);
+
+        return back()->with(
+            'success',
+            $request->status === 'late'
+                ? 'ស្ថានភាព៖ មកឆាន់ (យឺត)'
+                : 'ស្ថានភាព៖ មិននៅកុដិ (Offline)'
+        );
+    }
+
+    /**
+     * Telegram notify
+     */
+    private function sendTelegramNotification($user, $status, $reason)
+    {
+        $token  = env('TELEGRAM_BOT_TOKEN');
+        $chatId = env('TELEGRAM_CHAT_ID');
+
+        if (!$token || !$chatId) return;
+
+        $statusEmoji = $status === 'late' ? '⏳' : '✅';
+        $statusText  = $status === 'late'
+            ? 'និមន្តមក (យឺត)'
+            : 'និមន្តទៅខាងក្រៅ (មិនឆាន់)';
+
+        $message = "🔔 *សេចក្ដីរាយការណ៍ភត្ត*\n";
+        $message .= "━━━━━━━━━━━━━━━\n";
+        $message .= "🧘 *ឈ្មោះ:* {$user->name}\n";
+        $message .= "📝 *មូលហេតុ:* {$reason}\n";
+        $message .= "⏰ *ពេលវេលា:* ".now()->format('d-M-Y | H:i')."\n";
+        $message .= "━━━━━━━━━━━━━━━\n";
+        $message .= "{$statusEmoji} *ស្ថានភាព:* {$statusText}";
 
         try {
-            Http::post("https://api.telegram.org/bot{$botToken}/sendMessage", [
-                'chat_id' => $chatId,
-                'text' => $message,
+            Http::post("https://api.telegram.org/bot{$token}/sendMessage", [
+                'chat_id'    => $chatId,
+                'text'       => $message,
                 'parse_mode' => 'Markdown'
             ]);
-            
-            return back()->with('success', 'សេចក្តីរាយការណ៍ត្រូវបានបញ្ជូនទៅ Telegram រួចរាល់! 🙏');
         } catch (\Exception $e) {
-            return back()->with('error', 'បណ្តាញមានបញ្ហា មិនអាចផ្ញើសារបានទេ។');
+            // silent fail
         }
+    }
+
+    /**
+     * Cancel report
+     */
+    public function cancelSkip($id)
+    {
+        $report = Donation::where('id', $id)
+            ->where('user_id', auth()->id())
+            ->where('amount', 0)
+            ->firstOrFail();
+
+        $report->delete();
+
+        return back()->with('success', 'បច្ចុប្បន្នភាព៖ លោកកំពុងនៅកុដិ (Online) វិញហើយ');
     }
 }

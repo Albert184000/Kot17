@@ -43,6 +43,17 @@ class DatabaseSeeder extends Seeder
             ]
         );
 
+        // User::updateOrCreate(
+        //     ['email' => 'Utilities Treasurer@kot17.com'],
+        //     [
+        //         'name' => 'Utilities Treasurer Kot17',
+        //         'phone' => '012000000',
+        //         'role' => 'Utilities Treasurer',
+        //         'is_active' => true,
+        //         'password' => Hash::make('12345678'),
+        //     ]
+        // );
+
         User::updateOrCreate(
             ['email' => 'member@kot17.com'],
             [

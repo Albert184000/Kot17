@@ -10,18 +10,19 @@ return new class extends Migration
      * Run the migrations.
      */
     public function up(): void
-    {
-        Schema::create('profile_update_requests', function (Blueprint $table) {
-            $table->id();
-            $table->timestamps();
-        });
-    }
+{
+    Schema::table('users', function (Blueprint $table) {
+        $table->integer('vassa')->nullable()->after('monk_rank');
+    });
+}
 
     /**
      * Reverse the migrations.
      */
     public function down(): void
     {
-        Schema::dropIfExists('profile_update_requests');
+        Schema::table('users', function (Blueprint $table) {
+            //
+        });
     }
 };

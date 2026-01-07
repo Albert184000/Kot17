@@ -3,8 +3,20 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Attendance extends Model
 {
-    protected $fillable = ['member_id', 'attendance_date', 'is_present'];
+    protected $table = 'attendances';
+
+    protected $fillable = [
+        'user_id',
+        'status', // ឧទាហរណ៍៖ 'away' ឬ 'present'
+        'reason',
+    ];
+
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
+    }
 }

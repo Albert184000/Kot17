@@ -44,13 +44,12 @@
     <div id="overlay" class="fixed inset-0 bg-black/50 z-40 hidden md:hidden" onclick="closeSidebar()"></div>
 
     <!-- Sidebar -->
-    <aside id="sidebar"
+<aside id="sidebar"
            class="w-72 bg-slate-900 text-white flex-shrink-0 relative hidden md:flex flex-col z-50
                   md:translate-x-0 translate-x-[-100%] md:static fixed inset-y-0 left-0 transition-transform duration-200">
 
-        <!-- Brand -->
         <div class="px-5 py-5 bg-orange-600 shadow-lg flex items-center gap-3">
-            <div class="w-10 h-10 bg-white/20 rounded-xl grid place-items-center overflow-hidden">
+            <div class="w-10 h-10 bg-white rounded-xl grid place-items-center overflow-hidden">
                 <img src="{{ asset('assets/images/logo_kot17.png') }}" alt="Kot17 Logo" class="w-8 h-8 object-contain">
             </div>
             <div class="leading-tight">
@@ -61,12 +60,12 @@
 
         <nav class="mt-5 px-3 space-y-2 flex-1 overflow-y-auto custom-scrollbar">
 
+            {{-- ១. ផ្នែករដ្ឋបាល (Admin Only) --}}
             @if(auth()->user()->role == 'admin')
                 <div class="px-4 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest">រដ្ឋបាល</div>
                 @php
                     $adminMenus = [
                         ['route' => 'admin.dashboard', 'icon' => 'fas fa-tachometer-alt', 'label' => 'ផ្ទាំងគ្រប់គ្រង'],
-                        // ['route' => 'admin.members.index', 'icon' => 'fas fa-users', 'label' => 'គ្រប់គ្រងសមាជិក', 'pattern' => 'admin.members.*'],
                         ['route' => 'admin.users.index', 'icon' => 'fas fa-users', 'label' => 'គ្រប់គ្រងអ្នកប្រើប្រាស់', 'pattern' => 'admin.users.*'],
                         ['route' => 'admin.reports.index', 'icon' => 'fas fa-chart-line', 'label' => 'របាយការណ៍', 'pattern' => 'admin.reports.*'],
                     ];
@@ -74,7 +73,6 @@
 
                 @foreach($adminMenus as $menu)
                     @php $isActive = request()->routeIs($menu['pattern'] ?? $menu['route']); @endphp
-
                     <a href="{{ route($menu['route']) }}"
                        class="flex items-center py-3 px-4 rounded-xl transition-all
                               {{ $isActive ? 'bg-orange-600 text-white shadow-lg nav-active' : 'text-slate-300 hover:bg-slate-800 hover:text-white' }}">
@@ -84,7 +82,7 @@
                 @endforeach
             @endif
 
-
+            {{-- ២. ផ្នែកហិរញ្ញវត្ថុ (Admin & Treasurer) --}}
             @if(in_array(auth()->user()->role, ['admin', 'treasurer']))
                 <div class="px-4 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest border-t border-slate-800 mt-4">ហិរញ្ញវត្ថុ</div>
                 @php
@@ -107,17 +105,34 @@
                 @endforeach
             @endif
 
+            {{-- ៣. ផ្នែកទឹកភ្លើង (Moved here - Under Finance) --}}
+            @if(in_array(auth()->user()->role, ['admin', 'utilities_treasurer']))
+                <div class="px-4 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest border-t border-slate-800 mt-4">សេវាសាធារណៈ</div>
+                @php
+                    $utilitiesMenus = [
+                        ['route' => 'admin.utilities.index', 'icon' => 'fas fa-bolt text-yellow-400', 'label' => 'ចំណាយទឹក និងភ្លើង', 'pattern' => 'admin.utilities.*'],
+                    ];
+                @endphp
 
+                @foreach($utilitiesMenus as $menu)
+                    @php $isActive = request()->routeIs($menu['pattern'] ?? $menu['route']); @endphp
+                    <a href="{{ route($menu['route']) }}"
+                       class="flex items-center py-3 px-4 rounded-xl transition-all
+                              {{ $isActive ? 'bg-orange-600 text-white shadow-lg nav-active' : 'text-slate-300 hover:bg-slate-800 hover:text-white' }}">
+                        <i class="{{ $menu['icon'] }} w-6"></i>
+                        <span class="ml-3 font-semibold">{{ $menu['label'] }}</span>
+                    </a>
+                @endforeach
+            @endif
+
+            {{-- ៤. ផ្នែកអ្នកប្រមូលលុយ (Admin & Collector) --}}
             @if(in_array(auth()->user()->role, ['admin', 'collector']))
                 <div class="px-4 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest border-t border-slate-800 mt-4">អ្នកប្រមូលលុយ</div>
                 @php
                     $collectorMenus = [
-                    
-                        ['route' => 'collector.dashboard', 
-                            'icon'  => 'fas fa-bowl-rice', 
-                            'label' => 'ផ្ទាំងអ្នកប្រមូល'
-                        ],
+                        ['route' => 'collector.dashboard', 'icon' => 'fas fa-bowl-rice', 'label' => 'ផ្ទាំងអ្នកប្រមូល'],
                         ['route' => 'collector.collections.daily', 'icon' => 'fas fa-plus-circle', 'label' => 'ចុះបញ្ជីប្រមូលលុយ', 'pattern' => 'collector.collections.*'],
+                        ['route' => 'collector.reports.lunch', 'icon' => 'fas fa-chart-bar', 'label' => 'របាយការណ៍បច្ច័យចង្ហាន់', 'pattern' => 'collector.reports.lunch'],
                     ];
                 @endphp
 
@@ -131,24 +146,30 @@
                     </a>
                 @endforeach
             @endif
-        </nav>
 
-        <!-- Footer / Logout -->
-        <div class="p-4 border-t border-slate-800 bg-slate-900">
-            <form action="{{ route('logout') }}" method="POST">
+        </nav>
+        {{-- ៥. ផ្នែកខាងក្រោម (Logout Section) --}}
+        <div class="p-3 border-t border-slate-800 bg-slate-900/50">
+            <div class="flex items-center gap-3 px-4 py-3 mb-2">
+                <div class="w-9 h-9 rounded-full bg-orange-600/20 flex items-center justify-center text-orange-500 font-black border border-orange-600/30">
+                    {{ substr(auth()->user()->name, 0, 1) }}
+                </div>
+                <div class="leading-tight overflow-hidden text-ellipsis whitespace-nowrap">
+                    <div class="text-sm font-bold text-white">{{ auth()->user()->name }}</div>
+                    <div class="text-[10px] text-slate-500 capitalize">{{ auth()->user()->role }}</div>
+                </div>
+            </div>
+
+            <form method="POST" action="{{ route('logout') }}">
                 @csrf
-                <button type="submit"
-                        class="flex items-center w-full py-3 px-4 text-red-300 hover:bg-red-600 hover:text-white rounded-xl transition-all font-extrabold">
-                    <i class="fas fa-sign-out-alt w-6"></i>
-                    <span class="ml-3">ចាកចេញ</span>
+                <button type="submit" 
+                        class="w-full flex items-center py-3 px-4 rounded-xl text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-all font-semibold group">
+                    <i class="fas fa-sign-out-alt w-6 group-hover:translate-x-1 transition-transform"></i>
+                    <span class="ml-3">ចាកចេញពីប្រព័ន្ធ</span>
                 </button>
             </form>
-
-            <div class="mt-3 text-[11px] text-slate-500 px-1">
-                © ២០២៦ កុដិ១៧
-            </div>
         </div>
-    </aside>
+        </aside>
 
     <!-- Main -->
     <div class="flex-1 flex flex-col overflow-hidden">
