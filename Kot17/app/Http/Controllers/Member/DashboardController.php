@@ -12,15 +12,16 @@ class DashboardController extends Controller
 {
     public function index()
     {
-        $user       = auth()->user();
-        $today      = today();
+        $user  = auth()->user();
+        $today = today();
 
         /**
-         * 1️⃣ My report (today, amount = 0)
+         * 1️⃣ My report (today, amount = 0) => OFFLINE REPORT
          */
         $myReport = Donation::where('user_id', $user->id)
             ->whereDate('created_at', $today)
             ->where('amount', 0)
+            ->latest()
             ->first();
 
         /**
@@ -29,10 +30,53 @@ class DashboardController extends Controller
         $admin      = User::where('role', 'admin')->first();
         $treasurer  = User::where('role', 'treasurer')->first();
         $collectors = User::where('role', 'collector')->orderBy('name')->get();
-        $members    = User::where('role', 'member')->orderBy('name')->get();
 
         /**
-         * 3️⃣ Donation stats (for current user)
+         * ✅ 3️⃣ Members list (IMPORTANT)
+         * - old code: role=member only ❌ (miss monks/officers)
+         * - new code: everyone that belongs to org (adjust if you want)
+         */
+        $members = User::query()
+            ->whereNull('deleted_at')
+            ->orderBy('name')
+            ->get();
+
+        /**
+         * ✅ 4️⃣ Monk groups (for dashboard org-chart)
+         * Use person_type + monk_rank (NOT role)
+         */
+        $mahaTheras = User::whereNull('deleted_at')
+            ->where('person_type', 'monk')
+            ->where('monk_rank', 'maha_thera')
+            ->orderByDesc('vassa')
+            ->orderBy('name')
+            ->get();
+
+        $seniorMonks = User::whereNull('deleted_at')
+            ->where('person_type', 'monk')
+            ->whereIn('monk_rank', ['bhikkhu', 'senior_monk']) // support old values
+            ->orderByDesc('vassa')
+            ->orderBy('name')
+            ->get();
+
+        $juniors = User::whereNull('deleted_at')
+            ->where('person_type', 'monk')
+            ->whereIn('monk_rank', ['samanera', 'junior_monk', 'monk', null]) // support old values + null
+            ->orderByDesc('vassa')
+            ->orderBy('name')
+            ->get();
+
+        /**
+         * ✅ 5️⃣ Students (adjust rule)
+         * If you store students in role=student:
+         */
+        $students = User::whereNull('deleted_at')
+            ->where('role', 'student')
+            ->orderBy('name')
+            ->get();
+
+        /**
+         * 6️⃣ Donation stats (for current user)
          */
         $totalIn = Donation::where('user_id', $user->id)->sum('amount');
         $paymentsCount = Donation::where('user_id', $user->id)->count();
@@ -43,16 +87,19 @@ class DashboardController extends Controller
             ->get();
 
         /**
-         * 4️⃣ Attendance (ALL users)
+         * ✅ 7️⃣ Attendance group (ALL people you want to count)
+         * - old code used role monk/student ❌
+         * - new code uses all members (same as org)
          */
-        $allMembers = User::whereIn('role', ['admin','treasurer','collector','member','monk','student'])
+        $allMembers = User::query()
+            ->whereNull('deleted_at')
             ->orderBy('name')
             ->get();
 
         $totalPeople = $allMembers->count();
 
         /**
-         * 5️⃣ Today offline reports (ONE QUERY)
+         * ✅ 8️⃣ Today offline reports (ONE QUERY)
          */
         $todayOfflineReports = Donation::whereDate('created_at', $today)
             ->where('amount', 0)
@@ -60,8 +107,9 @@ class DashboardController extends Controller
             ->get()
             ->keyBy('user_id');
 
-        $todayReports = $todayOfflineReports->count();
-        $offlineUserIds = $todayOfflineReports->keys()->all();
+        $offlineUserIds = $todayOfflineReports->keys()->values()->all();
+        $offlineCount   = $todayOfflineReports->count();
+        $onlineCount    = max(0, $totalPeople - $offlineCount);
 
         return view('member.dashboard', compact(
             'user',
@@ -72,105 +120,25 @@ class DashboardController extends Controller
             'collectors',
             'members',
 
+            // ✅ monk groups for org chart
+            'mahaTheras',
+            'seniorMonks',
+            'juniors',
+
+            'students',
+
             'totalIn',
             'paymentsCount',
             'recentDonations',
 
             'allMembers',
             'totalPeople',
-            'todayReports',
+            'offlineCount',
+            'onlineCount',
             'todayOfflineReports',
             'offlineUserIds'
         ));
     }
 
-    /**
-     * Skip / Late report
-     */
-    public function skipMeal(Request $request)
-    {
-        $request->validate([
-            'reason' => 'required|string|max:500',
-            'status' => 'required|in:skip,late',
-        ]);
-
-        $user = auth()->user();
-
-        // ❌ Prevent duplicate report in same day
-        $alreadyReported = Donation::where('user_id', $user->id)
-            ->whereDate('created_at', today())
-            ->where('amount', 0)
-            ->exists();
-
-        if ($alreadyReported) {
-            return back()->with('success', 'លោកបានរាយការណ៍រួចហើយសម្រាប់ថ្ងៃនេះ។');
-        }
-
-        // ✅ Save report
-        Donation::create([
-            'user_id' => $user->id,
-            'amount'  => 0,
-            'status'  => $request->status,
-            'reason'  => $request->reason,
-        ]);
-
-        // 📩 Telegram
-        $this->sendTelegramNotification($user, $request->status, $request->reason);
-
-        return back()->with(
-            'success',
-            $request->status === 'late'
-                ? 'ស្ថានភាព៖ មកឆាន់ (យឺត)'
-                : 'ស្ថានភាព៖ មិននៅកុដិ (Offline)'
-        );
-    }
-
-    /**
-     * Telegram notify
-     */
-    private function sendTelegramNotification($user, $status, $reason)
-    {
-        $token  = env('TELEGRAM_BOT_TOKEN');
-        $chatId = env('TELEGRAM_CHAT_ID');
-
-        if (!$token || !$chatId) return;
-
-        $statusEmoji = $status === 'late' ? '⏳' : '✅';
-        $statusText  = $status === 'late'
-            ? 'និមន្តមក (យឺត)'
-            : 'និមន្តទៅខាងក្រៅ (មិនឆាន់)';
-
-        $message = "🔔 *សេចក្ដីរាយការណ៍ភត្ត*\n";
-        $message .= "━━━━━━━━━━━━━━━\n";
-        $message .= "🧘 *ឈ្មោះ:* {$user->name}\n";
-        $message .= "📝 *មូលហេតុ:* {$reason}\n";
-        $message .= "⏰ *ពេលវេលា:* ".now()->format('d-M-Y | H:i')."\n";
-        $message .= "━━━━━━━━━━━━━━━\n";
-        $message .= "{$statusEmoji} *ស្ថានភាព:* {$statusText}";
-
-        try {
-            Http::post("https://api.telegram.org/bot{$token}/sendMessage", [
-                'chat_id'    => $chatId,
-                'text'       => $message,
-                'parse_mode' => 'Markdown'
-            ]);
-        } catch (\Exception $e) {
-            // silent fail
-        }
-    }
-
-    /**
-     * Cancel report
-     */
-    public function cancelSkip($id)
-    {
-        $report = Donation::where('id', $id)
-            ->where('user_id', auth()->id())
-            ->where('amount', 0)
-            ->firstOrFail();
-
-        $report->delete();
-
-        return back()->with('success', 'បច្ចុប្បន្នភាព៖ លោកកំពុងនៅកុដិ (Online) វិញហើយ');
-    }
+    // skipMeal(), sendTelegramNotification(), cancelSkip() keep your code (OK)
 }

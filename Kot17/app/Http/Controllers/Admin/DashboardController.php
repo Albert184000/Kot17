@@ -3,81 +3,140 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
-use App\Models\Attendance;
-use App\Models\Donation;
-use App\Models\Member;
 use App\Models\User;
-use Carbon\Carbon;
+use Illuminate\Support\Str;
 
 class DashboardController extends Controller
 {
-   public function index()
-{
-    $today = Carbon::today()->toDateString();
-    $users = User::with('todayAttendance')->where('is_active', true)->get();
+    public function index()
+    {
+        // ✅ (Optional) if you only want active users, use ->where('is_active', true)
+        $users = User::query()->get();
 
-    $totalMembers   = Member::count();
-    $totalDonations = Donation::sum('amount');
-    $totalUsers     = $users->count();
-    $totalExpenses  = 0;
+        // ✅ Admin (can be null)
+        $admin = $users->firstWhere('role', 'admin');
 
-    // ⚠️ this line in your code is weird, but I keep it as-is
-    $presentCount = $users->where('todayAttendance', null)->count();
+        // ✅ Clean + normalize monk_rank safely (handles null, unicode spaces, zero-width)
+        $clean = function ($text) {
+            $text = (string)($text ?? '');
+            // remove unicode spaces + invisible chars + normal spaces
+            $text = preg_replace('/[\p{Z}\p{Cf}\s]+/u', '', $text);
+            return trim($text);
+        };
 
-    // ✅ Utility: support new role "utility" + fallback old "utilities_treasurer"
-    $utilities = $users->whereIn('role', ['utility', 'utilities_treasurer'])->sortBy('name');
+        $norm = function ($text) use ($clean) {
+            // Str::lower supports utf-8 reasonably
+            return Str::lower($clean($text));
+        };
 
-    // ✅ stats cards
-    $stats = [
-        'total_novices' => $users->whereIn('monk_rank', ['junior_monk', 'monk'])->count(),
-        'utilities'     => $utilities->count(),
-    ];
+        // ✅ Rank lists (NO SAMANERI)
+        $MAHA = array_map($norm, [
+            'maha_thera', 'maha-thera',
+            'ព្រះមហាថេរ', 'មហាថេរ',
+        ]);
 
-    // --- Org Chart groups ---
-    $admin = $users->where('role', 'admin')->first();
+        $BHIKKHU = array_map($norm, [
+            'bhikkhu',
+            'monk',
+            'senior_monk', 'senior-monk',
+            'ព្រះភិក្ខុ', 'ភិក្ខុ',
+        ]);
 
-    $mahaTheras = $users->where('person_type', 'monk')
-        ->where('monk_rank', 'maha_thera')
-        ->sortByDesc('vassa');
+        $NOVICE = array_map($norm, [
+            'samanera',
+            'novice', 'novice_monk', 'novice-monk',
+            'junior_monk', 'junior-monk',
+            'samoner',
+            'សាមណេរ',
+            'ព្រះសាមណេរ',
+        ]);
 
-    $seniorMonks = $users->where('person_type', 'monk')
-        ->where('monk_rank', 'senior_monk')
-        ->sortByDesc('vassa');
+        // ✅ forbid "samaneri" in any form
+        $isSamaneri = function ($rankNorm) {
+            return Str::contains($rankNorm, ['សាមណេរី', 'samaneri']);
+        };
 
-    $monks = $users->where('person_type', 'monk')
-        ->whereIn('monk_rank', ['junior_monk', 'monk'])
-        ->sortByDesc('vassa');
+        // ✅ Detect novice (male only) — no samaneri
+        $isNovice = function ($rankNorm) use ($NOVICE, $isSamaneri) {
+            if ($isSamaneri($rankNorm)) return false;
 
-    $treasurer  = $users->where('role', 'treasurer')->first();
-    $collectors = $users->where('role', 'collector')->sortBy('name');
-    $students   = $users->where('person_type', 'lay')->where('role', 'member')->sortBy('name');
+            if (in_array($rankNorm, $NOVICE, true)) return true;
 
-    return view('admin.dashboard', [
-        'users'           => $users,
-        'stats'           => $stats,
-        'totalMembers'    => $totalMembers,
-        'totalDonations'  => $totalDonations,
-        'totalExpenses'   => $totalExpenses,
-        'totalUsers'      => $totalUsers,
-        'presentCount'    => $presentCount,
-        'recentDonations' => Donation::with('user')->latest()->take(5)->get(),
+            // fallback (NO សាមណេរី)
+            return Str::contains($rankNorm, ['សាមណេ', 'novice', 'samon', 'saman']);
+        };
 
-        'admin'       => $admin,
-        'mahaTheras'  => $mahaTheras,
-        'seniorMonks' => $seniorMonks,
-        'monks'       => $monks,
+        // ✅ Decide monk? (helps for students filtering)
+        $isMonkRank = function ($rankNorm) use ($MAHA, $BHIKKHU, $isNovice, $isSamaneri) {
+            if ($isSamaneri($rankNorm)) return false;
 
-        // ✅ 3 officers
-        'treasurer'  => $treasurer,
-        'utilities'  => $utilities,      // ⭐ NEW (use this in blade)
-        'collectors' => $collectors,
+            return in_array($rankNorm, $MAHA, true)
+                || in_array($rankNorm, $BHIKKHU, true)
+                || $isNovice($rankNorm);
+        };
 
-        // ✅ students below all
-        'students'   => $students,
+        // ✅ Work only from people who are monk OR rank indicates monk
+        // (Some old data might not have person_type, so keep rank-based backup)
+        $monksPool = $users->filter(function ($u) use ($norm, $isMonkRank) {
+            $rank = $norm($u->monk_rank);
+            return ($u->person_type === 'monk') || $isMonkRank($rank);
+        });
 
-        // ✅ Backward compatible (if your blade still uses this name)
-        'utilitiesTreasurers' => $utilities,
-    ]);
-}
+        // ✅ 1) MAHA (highest)
+        $mahaTheras = $monksPool
+            ->filter(fn($u) => in_array($norm($u->monk_rank), $MAHA, true))
+            ->sortByDesc(fn($u) => (int)($u->vassa ?? 0))
+            ->values();
 
+        // ✅ 2) NOVICE (lowest) — do this before bhikkhu to avoid overlap via fallback
+        $juniors = $monksPool
+            ->filter(fn($u) => $isNovice($norm($u->monk_rank)))
+            ->sortByDesc(fn($u) => (int)($u->vassa ?? 0))
+            ->values();
+
+        // ✅ 3) BHIKKHU (middle) — exclude maha + exclude novice
+        $seniorMonks = $monksPool
+            ->filter(function ($u) use ($norm, $BHIKKHU, $MAHA, $isNovice) {
+                $rank = $norm($u->monk_rank);
+                return in_array($rank, $BHIKKHU, true)
+                    && !in_array($rank, $MAHA, true)
+                    && !$isNovice($rank);
+            })
+            ->sortByDesc(fn($u) => (int)($u->vassa ?? 0))
+            ->values();
+
+        // ✅ Officers
+        $treasurer  = $users->firstWhere('role', 'treasurer');
+        $collectors = $users->where('role', 'collector')->values();
+        $utilities  = $users->where('role', 'utility')->values();
+
+        // ✅ Students (Lay only + not officers + not monks)
+        // If you want "member" only: add ->where('role','member') logic
+        $notStudentRoles = ['admin', 'treasurer', 'collector', 'utility'];
+
+        $students = $users->filter(function ($u) use ($norm, $isMonkRank, $notStudentRoles) {
+            $rank = $norm($u->monk_rank);
+
+            $isMonk = ($u->person_type === 'monk') || $isMonkRank($rank);
+
+            // ✅ student should be lay
+            $isLay = ($u->person_type === 'lay') || (!$isMonk);
+
+            return $isLay && !$isMonk && !in_array($u->role, $notStudentRoles, true);
+        })->values();
+
+        $totalOrg = $users->count();
+
+        return view('admin.dashboard', compact(
+            'admin',
+            'mahaTheras',
+            'seniorMonks',
+            'juniors',
+            'treasurer',
+            'collectors',
+            'utilities',
+            'students',
+            'totalOrg'
+        ));
+    }
 }

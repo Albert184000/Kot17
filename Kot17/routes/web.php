@@ -3,6 +3,9 @@
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Password;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Http\Request;
 
 // Auth
 use App\Http\Controllers\Auth\LoginController;
@@ -12,7 +15,7 @@ use App\Http\Controllers\Admin\DashboardController as AdminDashboard;
 use App\Http\Controllers\Admin\MemberController;
 use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\Admin\ReportController as AdminReport;
-use App\Http\Controllers\Admin\UtilitiesController;
+use App\Http\Controllers\Admin\UtilitiesController; // ✅ Keep ONE controller only
 
 // Treasurer Controllers
 use App\Http\Controllers\Treasurer\DashboardController as TreasurerDashboard;
@@ -50,7 +53,6 @@ Route::middleware('guest')->group(function () {
 Route::middleware('auth')->group(function () {
     Route::post('/logout', [LoginController::class, 'logout'])->name('logout');
 
-    // Central dashboard redirect by role
     Route::get('/dashboard', function () {
         $role = auth()->user()->role;
 
@@ -59,7 +61,7 @@ Route::middleware('auth')->group(function () {
             'treasurer' => redirect()->route('treasurer.dashboard'),
             'collector' => redirect()->route('collector.dashboard'),
             'member'    => redirect()->route('member.dashboard'),
-            'utility'   => redirect()->route('admin.utilities.index'), // ✅ utility redirect
+            'utility'   => redirect()->route('admin.utilities.index'),
             default     => abort(403),
         };
     })->name('dashboard');
@@ -75,10 +77,9 @@ Route::middleware(['auth', 'role:admin'])
     ->name('admin.')
     ->group(function () {
 
-        // Dashboard
         Route::get('/dashboard', [AdminDashboard::class, 'index'])->name('dashboard');
 
-        // User Management (Soft Deletes must be ABOVE Resource)
+        // Users
         Route::get('users/trash', [UserController::class, 'trash'])->name('users.trash');
         Route::post('users/{id}/restore', [UserController::class, 'restore'])->name('users.restore');
         Route::delete('users/{id}/force-delete', [UserController::class, 'forceDelete'])->name('users.force-delete');
@@ -90,29 +91,38 @@ Route::middleware(['auth', 'role:admin'])
 
         // Reports
         Route::get('/reports', [AdminReport::class, 'index'])->name('reports.index');
-        Route::get('/reports/monthly', [AdminReport::class, 'monthly'])->name('reports.monthly');
-        Route::get('/reports/custom', [AdminReport::class, 'custom'])->name('reports.custom');
+        Route::get('/reports/print', [AdminReport::class, 'print'])->name('reports.print');
     });
 
 /*
 |--------------------------------------------------------------------------
-| 4) Utilities Routes (admin + utility)
+| 4) Utilities Routes (admin + utility)  ✅ single source of truth
 |--------------------------------------------------------------------------
-| IMPORTANT: utilities must NOT be inside admin-only group,
-| otherwise role utility cannot access it.
 */
 Route::middleware(['auth', 'role:admin,utility'])
     ->prefix('admin')
     ->name('admin.')
     ->group(function () {
-        Route::get('/utilities', [UtilitiesController::class, 'index'])->name('utilities.index');
 
-        // If later you add CRUD:
-        // Route::get('/utilities/create', [UtilitiesController::class, 'create'])->name('utilities.create');
-        // Route::post('/utilities', [UtilitiesController::class, 'store'])->name('utilities.store');
-        // Route::get('/utilities/{id}/edit', [UtilitiesController::class, 'edit'])->name('utilities.edit');
-        // Route::put('/utilities/{id}', [UtilitiesController::class, 'update'])->name('utilities.update');
-        // Route::delete('/utilities/{id}', [UtilitiesController::class, 'destroy'])->name('utilities.destroy');
+        Route::get('/utilities', [UtilitiesController::class, 'index'])->name('utilities.index');
+        Route::post('/utilities', [UtilitiesController::class, 'store'])->name('utilities.store');
+
+        Route::get('/utilities/{bill}', [UtilitiesController::class, 'show'])
+            ->whereNumber('bill')
+            ->name('utilities.show');
+
+        Route::put('/utilities/{bill}', [UtilitiesController::class, 'update'])
+            ->whereNumber('bill')
+            ->name('utilities.update');
+
+        // ✅ added (from your duplicate block)
+        Route::get('/utilities/{bill}/export', [UtilitiesController::class, 'export'])
+            ->whereNumber('bill')
+            ->name('utilities.export');
+
+        Route::get('/utilities/{bill}/print', [UtilitiesController::class, 'print'])
+            ->whereNumber('bill')
+            ->name('utilities.print');
     });
 
 /*
@@ -124,13 +134,16 @@ Route::middleware(['auth', 'role:treasurer,admin'])
     ->prefix('treasurer')
     ->name('treasurer.')
     ->group(function () {
+
         Route::get('/dashboard', [TreasurerDashboard::class, 'index'])->name('dashboard');
-        Route::resource('donations', TreasurerDonationController::class)->only(['index','create','store','show']);
+
+        Route::resource('donations', TreasurerDonationController::class);
         Route::resource('expenses', ExpenseController::class);
 
         Route::get('/reports', [TreasurerReport::class, 'index'])->name('reports.index');
-        Route::get('/reports/monthly', [TreasurerReport::class, 'monthly'])->name('reports.monthly');
-        Route::get('/reports/custom', [TreasurerReport::class, 'custom'])->name('reports.custom');
+        Route::get('/reports/print', [TreasurerReport::class, 'print'])->name('reports.print');
+        Route::get('/reports/export/excel', [TreasurerReport::class, 'exportExcel'])->name('reports.export.excel');
+        Route::get('/reports/export/docx', [TreasurerReport::class, 'exportDocx'])->name('reports.export.docx');
     });
 
 /*
@@ -142,22 +155,21 @@ Route::middleware(['auth', 'role:collector,admin'])
     ->prefix('collector')
     ->name('collector.')
     ->group(function () {
+
         Route::get('/dashboard', [CollectorDashboard::class, 'index'])->name('dashboard');
 
-        // collections/donations
         Route::post('/donations', [CollectionController::class, 'store'])->name('donations.store');
         Route::post('/collections/collect', [CollectionController::class, 'store'])->name('collections.collect');
-
         Route::get('/donations', [CollectorDonationController::class, 'index'])->name('donations.index');
 
-        // reports
         Route::get('/reports/lunch', [CollectionController::class, 'lunchReport'])->name('reports.lunch');
         Route::get('/reports/donations', [CollectorDonationReportController::class, 'index'])->name('reports.donations');
 
-        // summary / history
         Route::post('/daily-summary', [CollectorDashboard::class, 'sendDailySummary'])->name('summary');
         Route::get('/collections/daily', [CollectionController::class, 'daily'])->name('collections.daily');
         Route::get('/collections/history', [CollectionController::class, 'history'])->name('collections.history');
+
+        Route::post('/expenses/store', [CollectionController::class, 'storeExpense'])->name('expenses.store');
     });
 
 /*
@@ -169,6 +181,7 @@ Route::middleware(['auth', 'role:member'])
     ->prefix('member')
     ->name('member.')
     ->group(function () {
+
         Route::get('/dashboard', [MemberDashboard::class, 'index'])->name('dashboard');
 
         Route::post('/skip-meal', [MemberDashboard::class, 'skipMeal'])->name('skip_meal');
@@ -186,6 +199,7 @@ Route::middleware(['auth', 'role:member'])
 |--------------------------------------------------------------------------
 */
 Route::middleware(['auth', 'role:admin'])->group(function () {
+
     Route::get('/init-db', function () {
         Artisan::call('migrate --force');
         return "✅ Database Initialized Successfully!";
@@ -195,9 +209,7 @@ Route::middleware(['auth', 'role:admin'])->group(function () {
         $token = env('TELEGRAM_BOT_TOKEN');
         $channelId = env('TELEGRAM_CHANEL_ID');
 
-        if (!$token || !$channelId) {
-            return "❌ Error: សូមពិនិត្យមើល .env";
-        }
+        if (!$token || !$channelId) return "❌ Error: សូមពិនិត្យមើល .env";
 
         $response = Http::post("https://api.telegram.org/bot{$token}/sendMessage", [
             'chat_id' => $channelId,
@@ -208,3 +220,46 @@ Route::middleware(['auth', 'role:admin'])->group(function () {
         return $response->json();
     });
 });
+
+/*
+|--------------------------------------------------------------------------
+| 9) Forgot Password + Reset Password
+|--------------------------------------------------------------------------
+*/
+Route::get('/forgot-password', fn () => view('auth.forgot-password'))->name('password.request');
+
+Route::post('/forgot-password', function (Request $request) {
+    $request->validate(['email' => 'required|email']);
+
+    $status = Password::sendResetLink($request->only('email'));
+
+    return $status === Password::RESET_LINK_SENT
+        ? back()->with('status', 'បានផ្ញើតំណភ្ជាប់ Reset ទៅ Email រួចរាល់ ✅')
+        : back()->withErrors(['email' => 'មិនអាចផ្ញើបាន។ សូមពិនិត្យ Email ឲ្យត្រឹមត្រូវ']);
+})->name('password.email');
+
+Route::get('/reset-password/{token}', function (string $token, Request $request) {
+    return view('auth.reset-password', [
+        'token' => $token,
+        'email' => $request->query('email'),
+    ]);
+})->name('password.reset');
+
+Route::post('/reset-password', function (Request $request) {
+    $request->validate([
+        'token' => 'required',
+        'email' => 'required|email',
+        'password' => 'required|min:8|confirmed',
+    ]);
+
+    $status = Password::reset(
+        $request->only('email','password','password_confirmation','token'),
+        function ($user) use ($request) {
+            $user->forceFill(['password' => Hash::make($request->password)])->save();
+        }
+    );
+
+    return $status === Password::PASSWORD_RESET
+        ? redirect()->route('login')->with('success', 'បានកំណត់លេខសម្ងាត់ថ្មីរួចរាល់ ✅')
+        : back()->withErrors(['email' => 'Reset token មិនត្រឹមត្រូវ ឬផុតកំណត់']);
+})->name('password.update');

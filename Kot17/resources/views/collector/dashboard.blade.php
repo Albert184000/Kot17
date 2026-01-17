@@ -11,121 +11,139 @@
     $totalPercentage = $goalUSD > 0 ? min(round(($totalInUSD / $goalUSD) * 100), 100) : 0;
 @endphp
 
+{{-- Load Alpine.js --}}
 <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
 
-{{-- ✅ ផ្នែក Summary Cards --}}
-<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-    <div class="p-6 rounded-[2rem] text-white shadow-lg {{ $todayTotalUSD > 0 ? 'bg-gradient-to-br from-blue-600 to-blue-700 shadow-blue-100' : 'bg-gray-400 opacity-50' }}">
-        <p class="text-blue-100 text-[10px] font-bold uppercase tracking-widest">សរុបក្នុងប្រព័ន្ធ ($)</p>
-        <h3 class="text-3xl font-black mt-2">${{ number_format($todayTotalUSD, 2) }}</h3>
-    </div>
+<div x-data="{ 
+    globalStatus: 'absent', 
+    imagePreviews: [],
+    handleFiles(event) {
+        this.imagePreviews = [];
+        const files = Array.from(event.target.files).slice(0, 4); // Limit to 4 images
+        files.forEach(file => {
+            const reader = new FileReader();
+            reader.onload = (e) => { this.imagePreviews.push(e.target.result) };
+            reader.readAsDataURL(file);
+        });
+    }
+}">
+    <form action="{{ route('collector.summary') }}" method="POST" enctype="multipart/form-data" onsubmit="return confirm('តើអ្នកពិតជាចង់ផ្ញើរបាយការណ៍រួមនេះទៅ Telegram មែនទេ?')">
+        @csrf
 
-    <div class="bg-gradient-to-br from-emerald-600 to-emerald-700 p-6 rounded-[2rem] text-white shadow-lg shadow-emerald-100">
-        <p class="text-emerald-100 text-[10px] font-bold uppercase tracking-widest">សរុបក្នុងប្រព័ន្ធ (៛)</p>
-        <h3 class="text-3xl font-black mt-2">{{ number_format($todayTotalKHR) }} ៛</h3>
-    </div>
-
-    <div class="bg-white p-6 rounded-[2rem] border border-gray-100 shadow-sm text-slate-800">
-        <p class="text-gray-400 text-[10px] font-bold uppercase tracking-widest">Progress ថ្ងៃនេះ ({{ $totalPercentage }}%)</p>
-        <div class="mt-4 h-2 bg-gray-100 rounded-full overflow-hidden">
-            <div class="bg-orange-500 h-full transition-all duration-700" style="width: {{ $totalPercentage }}%"></div>
-        </div>
-        <h4 class="text-xl font-black mt-4">${{ number_format($totalInUSD, 2) }}</h4>
-    </div>
-</div>
-
-<form action="{{ route('collector.summary') }}" method="POST" onsubmit="return confirm('តើអ្នកពិតជាចង់ផ្ញើរបាយការណ៍រួមនេះទៅ Telegram មែនទេ?')">
-    @csrf
-
-    {{-- ១. ផ្នែកកំណត់តម្លៃបង់ក្នុងម្នាក់ --}}
-    <div class="bg-white rounded-[2rem] p-6 shadow-sm border border-gray-100 mb-6">
-        <div class="w-full">
-            <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">កំណត់ការបង់ប្រាក់ក្នុងម្នាក់:</label>
-            <div class="flex flex-wrap gap-4">
-                <input type="number" step="any" name="per_person_amount" placeholder="ឧ៖ 1 ឬ 5000" required
-                    class="w-32 px-4 py-2 border border-gray-100 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50/50 font-bold text-slate-700">
+        {{-- ១. ផ្នែកបញ្ចូលតម្លៃ និង រូបភាពច្រើនសន្លឹក --}}
+        <div class="bg-white rounded-[2.5rem] p-8 shadow-sm border border-gray-50 mb-8">
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
                 
-                <select name="per_person_currency" class="px-4 py-2 border border-gray-100 rounded-xl text-sm outline-none bg-gray-50/50 font-bold text-slate-700">
-                    <option value="USD">USD ($)</option>
-                    <option value="KHR">KHR (៛)</option>
-                </select>
+                {{-- បញ្ចូលទឹកប្រាក់ --}}
+                <div class="lg:col-span-3">
+                    <label class="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-3">ចំនួនទឹកប្រាក់បង់ក្នុងម្នាក់</label>
+                    <div class="relative">
+                        <input type="number" step="any" name="per_person_amount" value="5000" required
+                            class="w-full px-6 py-4 bg-gray-50/50 border border-gray-100 rounded-2xl text-lg font-black text-slate-700 outline-none focus:ring-2 focus:ring-blue-500/20 transition-all">
+                        <span class="absolute right-5 top-1/2 -translate-y-1/2 text-[10px] font-bold text-gray-300 italic">AMT</span>
+                    </div>
+                </div>
 
-                <input type="text" name="final_description" placeholder="សម្គាល់ (ឧ៖ ចង្ហាន់ថ្ងៃត្រង់)"
-                    class="grow px-4 py-2 border border-gray-100 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50/50 font-bold text-slate-700">
+                <div class="lg:col-span-2">
+                    <label class="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-3">រូបិយប័ណ្ណ</label>
+                    <select name="per_person_currency" class="w-full px-5 py-4 bg-gray-50/50 border border-gray-100 rounded-2xl font-bold text-slate-700 outline-none cursor-pointer appearance-none">
+                        <option value="KHR" selected>KHR (៛)</option>
+                        <option value="USD">USD ($)</option>
+                    </select>
+                </div>
+
+                {{-- បន្ថែមផ្នែក Upload រូបភាពច្រើន (Multiple Images) --}}
+                <div class="lg:col-span-4">
+                    <label class="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-3">រូបភាពយោង (អតិបរមា ៤ សន្លឹក)</label>
+                    <div class="relative group">
+                        <input type="file" name="report_images[]" id="report_images" accept="image/*" multiple class="hidden" 
+                               @change="handleFiles($event)">
+                        
+                        <label for="report_images" class="flex flex-wrap gap-2 items-center justify-center w-full min-h-[60px] px-6 py-3 bg-gray-50/50 border-2 border-dashed border-gray-200 rounded-2xl cursor-pointer hover:border-blue-400 hover:bg-blue-50/30 transition-all">
+                            
+                            <template x-if="imagePreviews.length === 0">
+                                <div class="text-center">
+                                    <i class="fas fa-camera text-gray-400"></i>
+                                    <span class="text-[10px] font-bold text-gray-400 ml-2">ភ្ជាប់រូបភាព (១-៤ សន្លឹក)</span>
+                                </div>
+                            </template>
+
+                            <div class="flex flex-wrap gap-2">
+                                <template x-for="(img, index) in imagePreviews" :key="index">
+                                    <div class="relative">
+                                        <img :src="img" class="h-12 w-12 object-cover rounded-lg shadow-sm border-2 border-white">
+                                        <div class="absolute -top-1 -right-1 bg-blue-500 text-white text-[8px] w-4 h-4 rounded-full flex items-center justify-center" x-text="index + 1"></div>
+                                    </div>
+                                </template>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="lg:col-span-3">
+                    <label class="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-3">សម្គាល់កម្មវិធី</label>
+                    <input type="text" name="final_description" placeholder="ឧ. ចង្ហាន់ថ្ងៃត្រង់"
+                        class="w-full px-6 py-4 bg-gray-50/50 border border-gray-100 rounded-2xl font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500/20">
+                </div>
             </div>
         </div>
-    </div>
 
-    {{-- ២. ផ្នែកបញ្ជីវត្តមានសមាជិកពិត --}}
-    <div class="bg-white rounded-[2rem] p-8 shadow-sm border border-gray-100 mb-6">
-        <div class="flex flex-col md:flex-row items-center justify-between gap-4 mb-8">
-            <h3 class="font-black text-slate-800 text-xs uppercase tracking-[0.2em]">
-                <i class="fas fa-users mr-2 text-blue-500"></i>បញ្ជីវត្តមានបង់ប្រាក់ថ្ងៃនេះ
-            </h3>
-            
-            <button type="submit" class="w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white px-10 py-4 rounded-2xl font-black shadow-lg shadow-blue-100 transition-all flex items-center justify-center group uppercase tracking-widest text-[11px]">
-                <i class="fab fa-telegram-plane mr-3 text-lg group-hover:rotate-12 transition-transform"></i> 
-                ផ្ញើរបាយការណ៍រួមទៅ TELEGRAM 📊
-            </button>
-        </div>
-        
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            @foreach($realMembers as $member)
-            <div class="flex flex-col items-center p-6 bg-gray-50/50 rounded-[2rem] border border-gray-100 shadow-sm" x-data="{ status: 'absent' }">
-                <span class="font-black text-slate-700 text-sm mb-4">{{ $member->name }}</span>
-                <input type="hidden" name="attendance[{{ $member->name }}]" :value="status">
-                
-                <div class="flex flex-col gap-2 w-full">
-                    <button type="button" @click="status = 'present'"
-                        class="w-full py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border"
-                        :style="status === 'present' ? 'background-color: #10b981 !important; color: white !important; border-color: transparent !important;' : 'background-color: white; color: #9ca3af; border-color: #f3f4f6;'">
-                        <i class="fas fa-check-circle mr-1"></i> បង់រួច
-                    </button>
+        {{-- ២. ផ្នែកបញ្ជីវត្តមាន --}}
+        <div class="bg-white rounded-[2.5rem] p-10 shadow-sm border border-gray-50 mb-10">
+            <div class="flex flex-col md:flex-row items-center justify-between gap-6 mb-12">
+                <div class="flex items-center gap-5">
+                    <div class="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-500">
+                        <i class="fas fa-user-check text-xl"></i>
+                    </div>
+                    <div>
+                        <h3 class="font-black text-slate-800 text-sm uppercase tracking-widest">បញ្ជីវត្តមានបង់ប្រាក់</h3>
+                    </div>
+                </div>
 
-                    <button type="button" @click="status = 'absent'"
-                        class="w-full py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border"
-                        :style="status === 'absent' ? 'background-color: #f43f5e !important; color: white !important; border-color: transparent !important;' : 'background-color: white; color: #9ca3af; border-color: #f3f4f6;'">
-                        <i class="fas fa-times-circle mr-1"></i> មិនទាន់បង់
+                <div class="flex items-center gap-4 w-full md:w-auto">
+                    <div class="bg-gray-100 p-1.5 rounded-2xl flex gap-1">
+                        <button type="button" @click="globalStatus = 'present'" class="px-5 py-2 rounded-xl text-[10px] font-black uppercase transition-all" :class="globalStatus === 'present' ? 'bg-white shadow-sm text-slate-700' : 'text-gray-400'">បង់គ្រប់គ្នា</button>
+                        <button type="button" @click="globalStatus = 'absent'" class="px-5 py-2 rounded-xl text-[10px] font-black uppercase transition-all" :class="globalStatus === 'absent' ? 'bg-[#ff4d6d] text-white' : 'text-gray-400'">សម្អាត</button>
+                    </div>
+                    <button type="submit" class="flex-1 md:flex-none bg-[#3b82f6] hover:bg-blue-600 text-white px-8 py-4 rounded-2xl font-black shadow-lg flex items-center justify-center gap-3 transition-all active:scale-95 uppercase tracking-widest text-[11px]">
+                        <i class="fab fa-telegram-plane text-lg"></i> ផ្ញើរបាយការណ៍ 📊
                     </button>
                 </div>
             </div>
-            @endforeach
-        </div>
-    </div>
-</form>
+            
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
+                @foreach($realMembers as $member)
+                    @if($member->role !== 'member')
+                    <div class="relative flex flex-col items-center p-8 rounded-[3.5rem] bg-gray-50/50 border border-gray-100" 
+                         x-data="{ status: 'absent' }" 
+                         x-init="status = globalStatus; $watch('globalStatus', val => status = val)">
+                        
+                        <div class="w-20 h-20 rounded-full bg-white shadow-sm flex items-center justify-center mb-4 border-[6px] border-white text-2xl font-black text-slate-200 uppercase">
+                            {{ substr($member->name, 0, 1) }}
+                        </div>
 
-{{-- ✅ ផ្នែកប្រវត្តិ --}}
-<div class="bg-white rounded-[2rem] shadow-sm border border-gray-100 overflow-hidden mb-6">
-    <div class="p-6 border-b border-gray-50 bg-gray-50/30">
-        <h3 class="font-black text-slate-800 text-xs uppercase tracking-[0.2em]">
-            <i class="fas fa-history mr-2 text-orange-500"></i>ប្រវត្តិប្រមូលក្នុងប្រព័ន្ធ
-        </h3>
-    </div>
-    <div class="overflow-x-auto p-4">
-        <table class="w-full text-left border-separate border-spacing-y-2">
-            <thead>
-                <tr class="text-gray-400 uppercase text-[10px] font-black tracking-widest">
-                    <th class="px-6 py-2">ម្ចាស់ទាន</th>
-                    <th class="px-6 py-2">សម្គាល់</th>
-                    <th class="px-6 py-2 text-right">ទឹកប្រាក់</th>
-                </tr>
-            </thead>
-            <tbody>
-                @forelse($recentCollections as $item)
-                    <tr class="hover:bg-gray-50/80 transition-all shadow-sm">
-                        <td class="px-6 py-4 font-bold bg-white border-y border-l rounded-l-2xl border-gray-50 text-slate-800">{{ $item->donor_name }}</td>
-                        <td class="px-6 py-4 text-gray-500 text-xs italic bg-white border-y border-gray-50">{{ $item->description }}</td>
-                        <td class="px-6 py-4 text-right bg-white border-y border-r rounded-r-2xl border-gray-50">
-                            <span class="{{ $item->currency == 'USD' ? 'text-blue-600' : 'text-emerald-600' }} font-black text-lg">
-                                {{ $item->currency == 'USD' ? '$'.number_format($item->amount, 2) : number_format($item->amount).' ៛' }}
-                            </span>
-                        </td>
-                    </tr>
-                @empty
-                    <tr><td colspan="3" class="p-10 text-center text-gray-400 italic">មិនទាន់មានទិន្នន័យ</td></tr>
-                @endforelse
-            </tbody>
-        </table>
-    </div>
+                        <span class="font-black text-slate-700 text-lg mb-1">{{ $member->name }}</span>
+                        
+                        <input type="hidden" name="attendance[{{ $member->name }}]" :value="status">
+                        
+                        <div class="flex flex-col gap-2 w-full mt-4">
+                            <button type="button" @click="status = 'present'"
+                                class="w-full py-3 rounded-xl text-[10px] font-black uppercase transition-all border shadow-sm"
+                                :class="status === 'present' ? 'bg-white border-emerald-500 text-emerald-500' : 'bg-white border-gray-100 text-gray-300'">
+                                <i class="fas fa-check-circle mr-1"></i> បង់រួច
+                            </button>
+
+                            <button type="button" @click="status = 'absent'"
+                                class="w-full py-3 rounded-xl text-[10px] font-black uppercase transition-all border shadow-sm"
+                                :class="status === 'absent' ? 'bg-[#ff4d6d] border-transparent text-white' : 'bg-white border-gray-100 text-gray-300'">
+                                <i class="fas fa-times-circle mr-1"></i> មិនទាន់បង់
+                            </button>
+                        </div>
+                    </div>
+                    @endif
+                @endforeach
+            </div>
+        </div>
+    </form>
 </div>
 @endsection
